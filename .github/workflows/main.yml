@@ -1,0 +1,35 @@
+name: buildx
+
+on:
+  push:
+    branches: multiarch
+
+jobs:
+  buildx:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: crazy-max/ghaction-docker-buildx@v1
+        with:
+          version: latest
+
+      - name: Available platforms
+        run: echo ${{ steps.buildx.outputs.platforms }}
+
+      - name: Docker login
+        env:
+          DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
+        run: echo -n $DOCKER_HUB_TOKEN | docker login --username zlangbert --password-stdin
+
+      - name: Run Buildx
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64,linux/arm/v6,linux/arm/v7 \
+            --tag "zlangbert/flux-helm-operator:latest-multiarch" \
+            --tag "zlangbert/flux-helm-operator:$(git rev-parse --short "$GITHUB_SHA")-multiarch" \
+            --file docker/Dockerfile.build . \
+            --push
