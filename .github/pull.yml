@@ -1,4 +1,4 @@
 version: "1"
 rules:
   - base: multiarch
-    upstream: fluxcd:helm-v3-dev
+    upstream: fluxcd:master
