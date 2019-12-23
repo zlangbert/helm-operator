@@ -24,20 +24,6 @@ const (
 	StatusPendingRollback Status = "pending-rollback"
 )
 
-// Chart describes the chart for a release
-type Chart struct {
-	Name       string
-	Version    string
-	AppVersion string
-}
-
-// Info holds metadata of a chart deployment
-type Info struct {
-	LastDeployed time.Time
-	Description  string
-	Status       Status
-}
-
 // Release describes a generic chart deployment
 type Release struct {
 	Name      string
@@ -49,25 +35,42 @@ type Release struct {
 	Version   int
 }
 
+// Info holds metadata of a chart deployment
+type Info struct {
+	LastDeployed time.Time
+	Description  string
+	Status       Status
+}
+
+// Chart describes the chart for a release
+type Chart struct {
+	Name         string
+	Version      string
+	AppVersion   string
+	Files        []*File
+	Templates    []*File
+	Dependencies []*Chart
+}
+
+// File represents a file as a name/value pair.
+// The name is a relative path within the scope
+// of the chart's base directory.
+type File struct {
+	Name string
+	Data []byte
+}
+
 // Status holds the status of a release
 type Status string
+
+// AllowsUpgrade returns true if the status allows the release
+// to be upgraded. This is currently only the case if it equals
+// `StatusDeployed`.
+func (s Status) AllowsUpgrade() bool {
+	return s == StatusDeployed
+}
 
 // String returns the Status as a string
 func (s Status) String() string {
 	return string(s)
-}
-
-// Syncable returns if the Status allows a sync
-func (s Status) Syncable() bool {
-	switch s {
-	case StatusUnknown,
-		 StatusFailed,
-		 StatusUninstalling,
-		 StatusPendingInstall,
-		 StatusPendingUpgrade,
-		 StatusPendingRollback:
-		 return false
-	default:
-		return true
-	}
 }
