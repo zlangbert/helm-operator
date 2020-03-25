@@ -18,13 +18,20 @@ function setup() {
   poll_until_equals "gitconfig secret" "$GITCONFIG" "kubectl get secrets -n $E2E_NAMESPACE gitconfig -ojsonpath={..data.gitconfig} | base64 --decode"
 
   # Apply the HelmRelease fixtures
-  kubectl apply -f "$FIXTURES_DIR/releases" >&3
+  kubectl apply -f "$FIXTURES_DIR/releases/git.yaml" >&3
+  kubectl apply -f "$FIXTURES_DIR/releases/helm-repository.yaml" >&3
 
-  poll_until_equals 'podinfo-helm-repository HelmRelease' 'deployed' "kubectl -n $DEMO_NAMESPACE get helmrelease/podinfo-helm-repository -o 'custom-columns=status:status.releaseStatus' --no-headers"
-  poll_until_equals 'podinfo-git HelmRelease' 'deployed' "kubectl -n $DEMO_NAMESPACE get helmrelease/podinfo-git -o 'custom-columns=status:status.releaseStatus' --no-headers"
+  poll_until_equals 'podinfo-helm-repository to be deployed' 'deployed' "kubectl -n $DEMO_NAMESPACE get helmrelease/podinfo-helm-repository -o 'custom-columns=status:status.releaseStatus' --no-headers"
+  poll_until_equals 'antecedent annotation' "$DEMO_NAMESPACE:helmrelease/podinfo-helm-repository" "kubectl -n $DEMO_NAMESPACE get deploy/podinfo-helm-repository -o jsonpath='{.metadata.annotations.helm\.fluxcd\.io/antecedent}'"
+  poll_until_equals 'podinfo-git to be deployed' 'deployed' "kubectl -n $DEMO_NAMESPACE get helmrelease/podinfo-git -o 'custom-columns=status:status.releaseStatus' --no-headers"
+  poll_until_equals 'antecedent annotation' "$DEMO_NAMESPACE:helmrelease/podinfo-git" "kubectl -n $DEMO_NAMESPACE get deploy/podinfo-git -o jsonpath='{.metadata.annotations.helm\.fluxcd\.io/antecedent}'"
 }
 
 function teardown() {
+  # Teardown is verbose when a test fails, and this will help most of the time
+  # to determine _why_ it failed.
+  kubectl logs -n "$E2E_NAMESPACE" deploy/helm-operator
+
   # Removing the operator also takes care of the global resources it installs.
   uninstall_helm_operator_with_helm
   uninstall_tiller

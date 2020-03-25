@@ -2,7 +2,7 @@
 
 Each release of a chart is declared by a `HelmRelease`
 resource. The schema for these resources is given in [the custom
-resource definition](https://github.com/fluxcd/helm-operator/blob/master/deploy/flux-helm-release-crd.yaml). They
+resource definition](https://github.com/fluxcd/helm-operator/blob/master/deploy/crds.yaml). They
 look like this:
 
 ```yaml
@@ -16,6 +16,7 @@ spec:
   targetNamespace: mq
   timeout: 300
   resetValues: false
+  wait: false
   forceUpgrade: false
   chart:
     repository: https://kubernetes-charts.storage.googleapis.com/
@@ -35,15 +36,20 @@ If you don't supply the `targetNamespace`, the release will be installed
 in the same namespace as the HelmRelease object.
 
 The `chart` section gives a pointer to the chart; in this case, to a
-chart in a Helm repo. Since the helm operator is running in your
+chart in a Helm repo. Since the Helm operator is running in your
 cluster, and doesn't have access to local configuration, the
 repository is given as a URL rather than an alias (the URL in the
 example is what's usually aliased as `stable`). The `name` and
 `version` specify the chart to release.
 
-The `timeout` sets the timeout value for the helm install or upgrade. If you don't supply it, it is set to 300.
+The `timeout` sets the timeout value for the Helm install or upgrade.
+If you don't supply it, it is set to 300.
 
-The `resetValues`, if set to `true`, will reset values on helm upgrade.
+The `resetValues`, if set to `true`, will reset values on Helm upgrade.
+
+The `wait`, if set to `true`, will instruct the operator to wait for an
+Helm upgrade to complete before it is marked as successful in the
+`HelmRelease` resource.
 
 The `forceUpgrade`, if set to `true`, will force Helm upgrade through delete/recreate
 
@@ -105,6 +111,113 @@ OK
 > either need to port forward before making the request or put something
 > in front of it to serve as a gatekeeper.
 
+## Extending the supported Helm repository protocols
+
+By default, the Helm operator is able to pull charts from repositories
+using HTTP/S. It is however possible to extend the supported protocols
+by making use of a [Helm downloader plugin](https://helm.sh/docs/topics/plugins/#downloader-plugins),
+this allows you for example to use charts hosted on [Amazon S3](https://github.com/hypnoglow/helm-s3)
+or [Google Cloud Storage](https://github.com/hayorov/helm-gcs).
+
+> **Note:** the operator only offers support for _downloader plugins_,
+> other plugins will not be recognized nor used.
+
+**Plugin folder paths per Helm version:**
+
+| Version | Plugins | Config
+|--------|---------|---
+| Helm 2 | `/var/fluxd/helm/cache/plugins` | `/var/fluxd/helm/plugins`
+| Helm 3 | `/root/.cache/helm/plugins` | `/root/.local/share/helm/plugins`
+
+### Install a Helm downloader plugin
+
+The easiest way to install a plugin so that it becomes accessible to
+the Helm operator to use an [init container](https://kubernetes.io/docs/concepts/workloads/pods/init-containers/)
+and one of the available `helm` binaries in the operator's image and
+a volume mount. For the Helm chart of the operator, [see the
+documentation](https://github.com/fluxcd/helm-operator/tree/master/chart/helm-operator#use-helm-downloader-plugins).
+
+#### Using an init container
+
+Create a volume entry of [type `emptyDir`](https://kubernetes.io/docs/concepts/storage/volumes/#emptydir)
+to the deployment of your Helm operator, this is where the plugins will
+be stored for the lifetime duration of the pod.
+   
+```yaml
+spec:
+  volumes:
+  - name: helm-plugins-cache
+    emptyDir: {}
+```
+   
+Add a new init container that utilizes the same image as the operator's
+container and makes use of the earlier mentioned volume with correct
+volume mounts for the Helm version your are making use of.
+The available `helm2` and `helm3` binaries can then be used to install
+the plugin.
+   
+```yaml
+spec:
+  initContainers:
+  - name: helm-3-downloader-plugin
+    image: docker.io/fluxcd/helm-operator:<tag>
+    imagePullPolicy: IfNotPresent
+    command:
+      - 'sh'
+      - '-c'
+      # Replace '<plugin>' and '<version>' with the respective
+      # values of the plugin you want to install
+      - 'helm3 plugin install <plugin> --version <version>'
+    volumeMounts:
+    - name: helm-plugins-cache
+      # See: 'plugin folder paths per Helm version'
+      mountPath: /root/.cache/helm/plugins
+      subPath: v3
+    - name: helm-plugins-cache
+      # See: 'plugin folder paths per Helm version'
+      mountPath: /root/.local/share/helm/plugins
+      subPath: v3-config
+```
+
+Last, add the same volume mounts to the operator's container so the
+downloaded plugin becomes available.
+
+```yaml
+spec:
+  containers:
+  - name: flux-helm-operator
+    image: docker.io/fluxcd/helm-operator:<tag>
+    ...
+    volumeMounts:
+    - name: helm-plugins-cache
+      # See: 'plugin folder paths per Helm version'
+      mountPath: /root/.cache/helm/plugins
+      subPath: v3
+    - name: helm-plugins-cache
+      # See: 'plugin folder paths per Helm version'
+      mountPath: /root/.local/share/helm/plugins
+      subPath: v3-config
+```
+
+### Using an installed protocol in your `HelmRelease`
+
+Once a Helm downloader plugin has been successfully installed, the
+newly added protocol can be used in the `.spec.chart.repository`
+value of a `HelmRelease`.
+
+> **Note:** most downloader plugins expect some form of authentication
+> to be available to be able to download a chart, make sure those are
+> available in the operator's container before attempting to make use
+> of the newly added protocol.
+
+```yaml
+spec:
+  chart:
+    repository: s3://bucket-name/charts
+    name: chart-name
+    version: 1.0.0
+```
+
 ## Supplying values to the chart
 
 You can supply values to be used with the chart when installing it, in
@@ -134,7 +247,8 @@ spec:
 ### `.spec.valuesFrom`
 
 This is a list of secrets, config maps (in the same namespace as the
-`HelmRelease`) or external sources (URLs) from which to take values.
+`HelmRelease` by default, or in a configured namespace) or external
+sources (URLs) from which to take values.
 
 The values are merged in the order given, with later values
 overwriting earlier. These values always have a lower priority than
@@ -151,9 +265,10 @@ spec:
   # chart: ...
   valuesFrom:
   - configMapKeyRef:
-      # Name of the config map, must be in the same namespace as the
-      # HelmRelease
+      # Name of the config map
       name: default-values  # mandatory
+      # Namespace of the config map
+      namespace: my-ns      # optional; defaults to HelmRelease namespace
       # Key in the config map to get the values from
       key: values.yaml      # optional; defaults to values.yaml
       # If set to true successful retrieval of the values file is no
@@ -168,9 +283,10 @@ spec:
   # chart: ...
   valuesFrom:
   - secretKeyRef:
-      # Name of the secret, must be in the same namespace as the
-      # HelmRelease
+      # Name of the secret
       name: default-values # mandatory
+      # Namespace of the secret
+      namespace: my-ns      # optional; defaults to HelmRelease namespace
       # Key in the secret to get thre values from
       key: values.yaml     # optional; defaults to values.yaml
       # If set to true successful retrieval of the values file is no
@@ -296,6 +412,12 @@ the filename.
 ```sh
 cp ~/.helm/repository/repositories.yaml .
 sed -i -e 's/^\( *cache: \).*\/\(.*\.yaml\)/\1\2/g' repositories.yaml
+```
+
+If you are using OSX and Helm 3 the command will be:
+
+```sh
+cp ~/Library/Preferences/helm/repositories.yaml
 ```
 
 Now you can create a secret in the same namespace as you're running

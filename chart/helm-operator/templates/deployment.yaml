@@ -8,7 +8,7 @@ metadata:
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: 1
   selector:
     matchLabels:
       app: {{ template "helm-operator.name" . }}
@@ -20,12 +20,19 @@ spec:
       {{- if .Values.prometheus.enabled }}
         prometheus.io/scrape: "true"
       {{- end }}
-      {{- if .Values.annotations }}
-      {{- .Values.annotations | toYaml | trimSuffix "\n" | nindent 8 }}
+      {{- if .Values.podAnnotations }}
+      {{- range $key, $value := .Values.podAnnotations }}
+        {{ $key }}: {{ $value | quote }}
+      {{- end }}
       {{- end }}
       labels:
         app: {{ template "helm-operator.name" . }}
         release: {{ .Release.Name }}
+      {{- if .Values.podLabels }}
+      {{- range $key, $value := .Values.podLabels }}
+        {{ $key }}: {{ $value | quote }}
+      {{- end }}
+      {{- end }}
     spec:
       serviceAccountName: {{ template "helm-operator.serviceAccountName" . }}
       {{- if .Values.image.pullSecret }}
@@ -81,9 +88,22 @@ spec:
       - name: {{ .Values.configureRepositories.cacheVolumeName | quote }}
         emptyDir: {}
       {{- end }}
+      {{- if .Values.initPlugins.enable }}
+      - name: {{ .Values.initPlugins.cacheVolumeName | quote }}
+        emptyDir: {}
+      {{- end }}
       {{- if .Values.extraVolumes }}
 {{ toYaml .Values.extraVolumes | indent 6 }}
       {{- end }}
+{{- if or .Values.initContainers .Values.initPlugins.enable }}
+      initContainers:
+{{- if .Values.initContainers }}
+{{ toYaml .Values.initContainers | indent 6 }}
+{{- end }}
+{{- if .Values.initPlugins.enable }}
+{{- include "helm-operator.initPlugins" . | indent 6 }}
+{{- end }}
+{{- end }}
       containers:
       - name: flux-helm-operator
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -136,11 +156,37 @@ spec:
         {{- end }}
         {{- if .Values.configureRepositories.enable }}
         - name: {{ .Values.configureRepositories.volumeName | quote }}
-          mountPath: /var/fluxd/helm/repository/repositories.yaml
+          mountPath: /root/.helm/repository/repositories.yaml
           subPath: repositories.yaml
           readOnly: true
+        {{- if contains "v2" .Values.helm.versions }}
         - name: {{ .Values.configureRepositories.cacheVolumeName | quote }}
           mountPath: /var/fluxd/helm/repository/cache
+          subPath: v2
+        {{- end }}
+        {{- if contains "v3" .Values.helm.versions }}
+        - name: {{ .Values.configureRepositories.cacheVolumeName | quote }}
+          mountPath: /root/.cache/helm/repository
+          subPath: v3
+        {{- end }}
+        {{- end }}
+        {{- if .Values.initPlugins.enable }}
+        {{- if contains "v2" .Values.helm.versions }}
+        - name: {{ .Values.initPlugins.cacheVolumeName | quote }}
+          mountPath: /var/fluxd/helm/cache/plugins/
+          subPath: v2
+        - name: {{ .Values.initPlugins.cacheVolumeName | quote }}
+          mountPath: /var/fluxd/helm/plugins
+          subPath: v2-config
+        {{- end }}
+        {{- if contains "v3" .Values.helm.versions }}
+        - name: {{ .Values.initPlugins.cacheVolumeName | quote }}
+          mountPath: /root/.cache/helm/plugins
+          subPath: v3
+        - name: {{ .Values.initPlugins.cacheVolumeName | quote }}
+          mountPath: /root/.local/share/helm/plugins
+          subPath: v3-config
+        {{- end }}
         {{- end }}
         {{- if .Values.extraVolumeMounts }}
 {{ toYaml .Values.extraVolumeMounts | indent 8 }}
@@ -148,6 +194,11 @@ spec:
         args:
         {{- if .Values.helm.versions }}
         - --enabled-helm-versions={{ .Values.helm.versions }}
+        {{- if .Values.configureRepositories.enable }}
+        {{- range $version := splitList "," .Values.helm.versions }}
+        - --helm-repository-import={{ $version }}:/root/.helm/repository/repositories.yaml
+        {{- end }}
+        {{- end }}
         {{- end }}
         {{- if .Values.logFormat }}
         - --log-format={{ .Values.logFormat }}
@@ -229,6 +280,10 @@ spec:
         - name: TILLER_HISTORY_MAX
           value: "10"
       {{- end }}
+{{- if .Values.hostAliases }}
+      hostAliases:
+{{ toYaml .Values.hostAliases |indent 8 }}
+{{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
 {{ toYaml . | indent 8 }}

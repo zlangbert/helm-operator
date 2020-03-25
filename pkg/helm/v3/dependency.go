@@ -3,20 +3,17 @@ package v3
 import (
 	"helm.sh/helm/v3/pkg/downloader"
 
-	"github.com/fluxcd/helm-operator/pkg/helm"
+	"github.com/fluxcd/helm-operator/pkg/utils"
 )
 
 func (h *HelmV3) DependencyUpdate(chartPath string) error {
-	repositoryConfigLock.RLock()
-	defer repositoryConfigLock.RUnlock()
-
-	out := helm.NewLogWriter(h.logger)
+	out := utils.NewLogWriter(h.logger)
 	man := &downloader.Manager{
 		Out:              out,
 		ChartPath:        chartPath,
 		RepositoryConfig: repositoryConfig,
 		RepositoryCache:  repositoryCache,
-		Getters:          getters,
+		Getters:          getterProviders(),
 	}
 	return man.Update()
 }

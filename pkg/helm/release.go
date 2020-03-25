@@ -1,6 +1,10 @@
 package helm
 
-import "time"
+import (
+	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+)
 
 // Define release statuses
 const (
@@ -32,6 +36,7 @@ type Release struct {
 	Info      *Info
 	Values    map[string]interface{}
 	Manifest  string
+	Resources []unstructured.Unstructured
 	Version   int
 }
 
@@ -44,12 +49,11 @@ type Info struct {
 
 // Chart describes the chart for a release
 type Chart struct {
-	Name         string
-	Version      string
-	AppVersion   string
-	Files        []*File
-	Templates    []*File
-	Dependencies []*Chart
+	Name       string
+	Version    string
+	AppVersion string
+	Values     Values
+	Templates  []*File
 }
 
 // File represents a file as a name/value pair.

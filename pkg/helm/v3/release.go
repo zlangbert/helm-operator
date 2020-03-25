@@ -8,6 +8,10 @@ import (
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/release"
+	"helm.sh/helm/v3/pkg/releaseutil"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 
 	"github.com/fluxcd/helm-operator/pkg/helm"
 )
@@ -22,6 +26,7 @@ func releaseToGenericRelease(r *release.Release) *helm.Release {
 		Info:      infoToGenericInfo(r.Info),
 		Values:    configToGenericValues(r.Config),
 		Manifest:  r.Manifest,
+		Resources: manifestToUnstructuredResources(r.Manifest),
 		Version:   r.Version,
 	}
 }
@@ -30,12 +35,11 @@ func releaseToGenericRelease(r *release.Release) *helm.Release {
 // a generic `helm.Chart`
 func chartToGenericChart(c *chart.Chart) *helm.Chart {
 	return &helm.Chart{
-		Name:         c.Name(),
-		Version:      formatVersion(c),
-		AppVersion:   c.AppVersion(),
-		Files:        filesToGenericFiles(c.Files),
-		Templates:    filesToGenericFiles(c.Templates),
-		Dependencies: dependenciesToGenericDependencies(c.Dependencies()),
+		Name:       c.Name(),
+		Version:    formatVersion(c),
+		AppVersion: c.AppVersion(),
+		Values:     c.Values,
+		Templates:  filesToGenericFiles(c.Templates),
 	}
 }
 
@@ -50,19 +54,6 @@ func filesToGenericFiles(f []*chart.File) []*helm.File {
 		return seq.Compare(gf[i], gf[j]) > 0
 	})
 	return gf
-}
-
-// dependenciesToGenericDependencies transforms a `chart.Chart` dependency
-// slice into a stable sorted slice with generic `helm.Chart` dependencies.
-func dependenciesToGenericDependencies(d []*chart.Chart) []*helm.Chart {
-	gd := make([]*helm.Chart, len(d))
-	for i, dd := range d {
-		gd[i] = chartToGenericChart(dd)
-	}
-	sort.SliceStable(gd, func(i, j int) bool {
-		return seq.Compare(gd[i], gd[j]) > 0
-	})
-	return gd
 }
 
 // infoToGenericInfo transforms a v3 info structure into
@@ -102,6 +93,31 @@ func formatVersion(c *chart.Chart) string {
 		return ""
 	}
 	return c.Metadata.Version
+}
+
+// manifestToUnstructuredResources transforms a v3 manifest YAML string
+// into an array of Unstructured resources.
+func manifestToUnstructuredResources(manifest string) []unstructured.Unstructured {
+	manifests := releaseutil.SplitManifests(manifest)
+	var objs []unstructured.Unstructured
+	for _, manifest := range manifests {
+		var u unstructured.Unstructured
+		if err := yaml.Unmarshal([]byte(manifest), &u); err != nil {
+			continue
+		}
+		// Helm charts may include list kinds, we are only interested in
+		// the resource items on those lists.
+		if u.IsList() {
+			l, err := u.ToList()
+			if err != nil {
+				continue
+			}
+			objs = append(objs, l.Items...)
+			continue
+		}
+		objs = append(objs, u)
+	}
+	return objs
 }
 
 // lookUpGenericStatus looks up the generic status for the

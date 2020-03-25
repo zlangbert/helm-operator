@@ -5,33 +5,23 @@ import (
 	"sync"
 
 	"github.com/pkg/errors"
-
-	"k8s.io/helm/pkg/getter"
 	"k8s.io/helm/pkg/repo"
 )
 
-var (
-	repositoryConfigLock sync.RWMutex
-	getters              = getter.Providers{{
-		Schemes: []string{"http", "https"},
-		New: func(URL, CertFile, KeyFile, CAFile string) (getter.Getter, error) {
-			return getter.NewHTTPGetter(URL, CertFile, KeyFile, CAFile)
-		},
-	}}
-)
+var repositoryConfigLock sync.RWMutex
 
 func (h *HelmV2) RepositoryIndex() error {
-	repositoryConfigLock.RLock()
-	defer repositoryConfigLock.RUnlock()
 
+	repositoryConfigLock.RLock()
 	f, err := loadRepositoryConfig()
+	repositoryConfigLock.RUnlock()
 	if err != nil {
 		return err
 	}
 
 	var wg sync.WaitGroup
 	for _, c := range f.Repositories {
-		r, err := repo.NewChartRepository(c, getters)
+		r, err := repo.NewChartRepository(c, getterProviders())
 		if err != nil {
 			return err
 		}
@@ -39,8 +29,6 @@ func (h *HelmV2) RepositoryIndex() error {
 		go func(r *repo.ChartRepository) {
 			if err := r.DownloadIndexFile(repositoryCache); err != nil {
 				h.logger.Log("error", "unable to get an update from the chart repository", "url", r.Config.URL, "err", err)
-			} else {
-				h.logger.Log("info", "successfully got an update from the chart repository", "url", r.Config.URL)
 			}
 			wg.Done()
 		}(r)
@@ -73,7 +61,7 @@ func (h *HelmV2) RepositoryAdd(name, url, username, password, certFile, keyFile,
 		return errors.New("chart repository with name %s already exists")
 	}
 
-	r, err := repo.NewChartRepository(c, getters)
+	r, err := repo.NewChartRepository(c, getterProviders())
 	if err != nil {
 		return err
 	}
@@ -116,7 +104,7 @@ func (h *HelmV2) RepositoryImport(path string) error {
 			h.logger.Log("error", "repository with name already exists", "name", c.Name, "url", c.URL)
 			continue
 		}
-		r, err := repo.NewChartRepository(c, getters)
+		r, err := repo.NewChartRepository(c, getterProviders())
 		if err != nil {
 			h.logger.Log("error", err, "name", c.Name, "url", c.URL)
 			continue

@@ -18,7 +18,7 @@ helm repo add fluxcd https://charts.fluxcd.io
 Install the HelmRelease CRD:
 
 ```sh
-kubectl apply -f https://raw.githubusercontent.com/fluxcd/helm-operator/master/deploy/flux-helm-release-crd.yaml
+kubectl apply -f https://raw.githubusercontent.com/fluxcd/helm-operator/master/deploy/crds.yaml
 ```
 
 Install Helm Operator for Tiller in the fluxcd namespace:
@@ -46,10 +46,10 @@ You can add Helm repositories using the `configureRepositories` settings:
 helm upgrade -i helm-operator fluxcd/helm-operator \
 --namespace fluxcd \
 --set configureRepositories.enable=true \
---set configureRepositories.repositories[0].name=stable \
---set configureRepositories.repositories[0].url=https://kubernetes-charts.storage.googleapis.com \
---set configureRepositories.repositories[1].name=podinfo \
---set configureRepositories.repositories[1].url=https://stefanprodan.github.io/podinfo
+--set 'configureRepositories.repositories[0].name=stable' \
+--set 'configureRepositories.repositories[0].url=https://kubernetes-charts.storage.googleapis.com' \
+--set 'configureRepositories.repositories[1].name=podinfo' \
+--set 'configureRepositories.repositories[1].url=https://stefanprodan.github.io/podinfo'
 ```
 
 Install podinfo by referring to its Helm repository:
@@ -164,6 +164,47 @@ helm upgrade -i helm-operator fluxcd/helm-operator \
 
 The deploy key naming convention is `<Flux Release Name>-git-deploy`.
 
+## Use Helm downloader plugins
+
+Helm downloader plugins like [`hypnoglow/helm-s3`](https://github.com/hypnoglow/helm-s3)
+and [`hayorov/helm-gcs`](https://github.com/hayorov/helm-gcs) make it possible
+to extend the protocols Helm recognizes to e.g. pull charts from a S3 bucket.
+
+The chart offers an utility to install plugins before starting the operator
+using init containers:
+
+```sh
+helm upgrade -i helm-operator fluxcd/helm-operator \
+--namespace fluxcd \
+--set initPlugins.enable=true \
+--set 'initPlugins.plugins[0].plugin=https://github.com/hypnoglow/helm-s3.git' \
+--set 'initPlugins.plugins[0].version=0.9.2' \
+--set 'initPlugins.plugins[0].helmVersion=v3' \
+```
+
+> **Note:** most plugins assume credentials are available on the system they run on,
+> make sure those are available at the expected paths using e.g. `extraVolumes` and
+> `extraVolumeMounts`.
+
+You should now be able to make use of the protocol added by the plugin:
+
+```sh
+cat <<EOF | kubectl apply -f -
+apiVersion: helm.fluxcd.io/v1
+kind: HelmRelease
+metadata:
+  name: chart-from-s3
+  namespace: default
+spec:
+  chart:
+    repository: s3://bucket-name/charts
+    name: chart
+    version: 0.1.0
+  values:
+    replicaCount: 1
+EOF
+```
+
 ## Uninstall
 
 To uninstall/delete the `helm-operator` deployment:
@@ -195,9 +236,12 @@ The following tables lists the configurable parameters of the Flux chart and the
 | `tolerations`                                     | `[]`                                                 | Tolerations properties for the deployment
 | `affinity`                                        | `{}`                                                 | Affinity properties for the deployment
 | `extraEnvs`                                       | `[]`                                                 | Extra environment variables for the Helm Operator pod(s)
+| `podAnnotations`                                  | `{}`                                                 | Additional pod annotations
+| `podLabels`                                       | `{}`                                                 | Additional pod labels
 | `rbac.create`                                     | `true`                                               | If `true`, create and use RBAC resources
 | `rbac.pspEnabled`                                 | `false`                                              | If `true`, create and use a restricted pod security policy for Helm Operator pod(s)
 | `serviceAccount.create`                           | `true`                                               | If `true`, create a new service account
+| `serviceAccount.annotations`                      | ``                                                   | Additional Service Account annotations
 | `serviceAccount.name`                             | `flux`                                               | Service account to be used
 | `clusterRole.create`                              | `true`                                               | If `false`, Helm Operator will be restricted to the namespace where is deployed
 | `createCRD`                                       | `false`                                              | Create the HelmRelease CRD
@@ -235,10 +279,14 @@ The following tables lists the configurable parameters of the Flux chart and the
 | `configureRepositories.secretName`                | `flux-helm-repositories`                             | Name of the secret containing the contents of the `repositories.yaml` file
 | `configureRepositories.cacheName`                 | `repositories-cache`                                 | Name for the repository cache volume
 | `configureRepositories.repositories`              | `None`                                               | List of custom Helm repositories to add. If non empty, the corresponding secret with a `repositories.yaml` will be created
+| `initPlugins.enable`                              | `false`                                              | Enable the initialization of Helm plugins using init containers
+| `initPlugins.cacheVolumeName`                     | `plugins-cache`                                      | Name for the plugins cache volume
+| `initPlugins.plugins`                             | `None`                                               | List of Helm plugins to initialize before starting the operator. If non empty, an init container will be added for every entry.
 | `kube.config`                                     | `None`                                               | Override for kubectl default config in the Helm Operator pod(s).
 | `prometheus.enabled`                              | `false`                                              | If enabled, adds prometheus annotations to Helm Operator pod(s)
 | `prometheus.serviceMonitor.create`                | `false`                                              | Set to true if using the Prometheus Operator
 | `prometheus.serviceMonitor.interval`              | ``                                                   | Interval at which metrics should be scraped
 | `prometheus.serviceMonitor.namespace`             | ``                                                   | The namespace where the ServiceMonitor is deployed
 | `prometheus.serviceMonitor.additionalLabels`      | `{}`                                                 | Additional labels to add to the ServiceMonitor
-
+| `initContainers`                                  | `[]`                                                 | Init containers and their specs
+| `hostAliases`                                     | `{}`                                                 | Host aliases allow the modification of the hosts file (/etc/hosts) inside Helm Operator container. See <https://kubernetes.io/docs/concepts/services-networking/add-entries-to-pod-etc-hosts-with-host-aliases/>

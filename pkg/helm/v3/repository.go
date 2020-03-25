@@ -5,24 +5,16 @@ import (
 	"sync"
 
 	"github.com/pkg/errors"
-
-	"helm.sh/helm/v3/pkg/getter"
 	"helm.sh/helm/v3/pkg/repo"
 )
 
-var (
-	repositoryConfigLock sync.RWMutex
-	getters              = getter.Providers{{
-		Schemes: []string{"http", "https"},
-		New:     getter.NewHTTPGetter,
-	}}
-)
+var repositoryConfigLock sync.RWMutex
 
 func (h *HelmV3) RepositoryIndex() error {
-	repositoryConfigLock.RLock()
-	defer repositoryConfigLock.RUnlock()
 
+	repositoryConfigLock.RLock()
 	f, err := loadRepositoryConfig()
+	repositoryConfigLock.RUnlock()
 	if err != nil {
 		return err
 	}
@@ -37,8 +29,6 @@ func (h *HelmV3) RepositoryIndex() error {
 		go func(r *repo.ChartRepository) {
 			if _, err := r.DownloadIndexFile(); err != nil {
 				h.logger.Log("error", "unable to get an update from the chart repository", "url", r.Config.URL, "err", err)
-			} else {
-				h.logger.Log("info", "successfully got an update from the chart repository", "url", r.Config.URL)
 			}
 			wg.Done()
 		}(r)
@@ -68,7 +58,7 @@ func (h *HelmV3) RepositoryAdd(name, url, username, password, certFile, keyFile,
 	f.Add(c)
 
 	if f.Has(name) {
-		return errors.New("chart repository with name %s already exists")
+		return errors.New("chart repository with name '%s' already exists")
 	}
 
 	r, err := newChartRepository(c)
@@ -136,7 +126,7 @@ func (h *HelmV3) RepositoryImport(path string) error {
 // of the cache path and getters while duplicating as less
 // code as possible.
 func newChartRepository(e *repo.Entry) (*repo.ChartRepository, error) {
-	cr, err := repo.NewChartRepository(e, getters)
+	cr, err := repo.NewChartRepository(e, getterProviders())
 	if err != nil {
 		return nil, err
 	}

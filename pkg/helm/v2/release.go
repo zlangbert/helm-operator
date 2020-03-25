@@ -4,12 +4,14 @@ import (
 	"sort"
 	"time"
 
-	"github.com/golang/protobuf/ptypes/any"
 	"github.com/ncabatoff/go-seq/seq"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/helm/pkg/chartutil"
 	"k8s.io/helm/pkg/proto/hapi/chart"
 	"k8s.io/helm/pkg/proto/hapi/release"
+	"k8s.io/helm/pkg/releaseutil"
+	"sigs.k8s.io/yaml"
 
 	"github.com/fluxcd/helm-operator/pkg/helm"
 )
@@ -24,6 +26,7 @@ func releaseToGenericRelease(r *release.Release) *helm.Release {
 		Info:      infoToGenericInfo(r.Info),
 		Values:    valuesToGenericValues(r.Config),
 		Manifest:  r.Manifest,
+		Resources: manifestToUnstructuredResources(r.Manifest),
 		Version:   int(r.Version),
 	}
 }
@@ -36,27 +39,14 @@ func chartToGenericChart(c *chart.Chart) *helm.Chart {
 	if c == nil || c.Metadata == nil {
 		return nil
 	}
-	return &helm.Chart{
-		Name:         c.Metadata.Name,
-		Version:      c.Metadata.Version,
-		AppVersion:   c.Metadata.AppVersion,
-		Files:        filesToGenericFiles(c.Files),
-		Templates:    templatesToGenericFiles(c.Templates),
-		Dependencies: dependenciesToGenericDependencies(c.Dependencies),
-	}
-}
 
-// filesToGenericFiles transforms an `any.Any` slice into a
-// stable sorted slice with generic `helm.File`s
-func filesToGenericFiles(f []*any.Any) []*helm.File {
-	gf := make([]*helm.File, len(f))
-	for i, ff := range f {
-		gf[i] = &helm.File{Name: ff.TypeUrl, Data: ff.Value}
+	return &helm.Chart{
+		Name:       c.Metadata.Name,
+		Version:    c.Metadata.Version,
+		AppVersion: c.Metadata.AppVersion,
+		Values:     valuesToGenericValues(c.Values),
+		Templates:  templatesToGenericFiles(c.Templates),
 	}
-	sort.SliceStable(gf, func(i, j int) bool {
-		return seq.Compare(gf[i], gf[j]) > 0
-	})
-	return gf
 }
 
 // filesToGenericFiles transforms a `chart.Template` slice into
@@ -70,19 +60,6 @@ func templatesToGenericFiles(t []*chart.Template) []*helm.File {
 		return seq.Compare(gf[i], gf[j]) > 0
 	})
 	return gf
-}
-
-// dependenciesToGenericDependencies transforms a `chart.Chart` dependency
-// slice into a stable sorted slice with generic `helm.Chart` dependencies.
-func dependenciesToGenericDependencies(d []*chart.Chart) []*helm.Chart {
-	gd := make([]*helm.Chart, len(d))
-	for i, dd := range d {
-		gd[i] = chartToGenericChart(dd)
-	}
-	sort.SliceStable(gd, func(i, j int) bool {
-		return seq.Compare(gd[i], gd[j]) > 0
-	})
-	return gd
 }
 
 // infoToGenericInfo transforms a v2 info structure into
@@ -103,6 +80,31 @@ func infoToGenericInfo(i *release.Info) *helm.Info {
 func valuesToGenericValues(c *chart.Config) map[string]interface{} {
 	vals, _ := chartutil.ReadValues([]byte(c.GetRaw()))
 	return vals.AsMap()
+}
+
+// manifestToUnstructuredResources transforms a v2 manifest YAML string
+// into an array of Unstructured resources.
+func manifestToUnstructuredResources(manifest string) []unstructured.Unstructured {
+	manifests := releaseutil.SplitManifests(manifest)
+	var objs []unstructured.Unstructured
+	for _, manifest := range manifests {
+		var u unstructured.Unstructured
+		if err := yaml.Unmarshal([]byte(manifest), &u); err != nil {
+			continue
+		}
+		// Helm charts may include list kinds, we are only interested in
+		// the resource items on those lists.
+		if u.IsList() {
+			l, err := u.ToList()
+			if err != nil {
+				continue
+			}
+			objs = append(objs, l.Items...)
+			continue
+		}
+		objs = append(objs, u)
+	}
+	return objs
 }
 
 // lookUpGenericStatus looks up the generic status for the

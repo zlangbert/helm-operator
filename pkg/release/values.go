@@ -1,14 +1,13 @@
 package release
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"path/filepath"
 
+	"github.com/fluxcd/helm-operator/pkg/helm"
 	"github.com/ghodss/yaml"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -18,62 +17,43 @@ import (
 	"github.com/fluxcd/helm-operator/pkg/apis/helm.fluxcd.io/v1"
 )
 
-// values represents a collection of (Helm) values.
-// We define our own type to avoid working with two `chartutil`
-// versions.
-type values map[string]interface{}
-
-// YAML encodes the values into YAML bytes.
-func (v values) YAML() ([]byte, error) {
-	b, err := yaml.Marshal(v)
-	return b, err
-}
-
-// Checksum calculates and returns the SHA256 checksum of the YAML
-// encoded values.
-func (v values) Checksum() string {
-	b, _ := v.YAML()
-
-	hasher := sha256.New()
-	hasher.Write(b)
-	return hex.EncodeToString(hasher.Sum(nil))
-}
-
 // values attempts to compose the final values for the given
 // `HelmRelease`. It returns the values as bytes and a checksum,
 // or an error in case anything went wrong.
-func composeValues(coreV1Client corev1.CoreV1Interface, hr *v1.HelmRelease, chartPath string) (values, error) {
-	result := values{}
-	ns := hr.Namespace
+func composeValues(coreV1Client corev1.CoreV1Interface, hr *v1.HelmRelease, chartPath string) (helm.Values, error) {
+	result := helm.Values{}
 
 	for _, v := range hr.GetValuesFromSources() {
-		var valueFile values
+		var valueFile helm.Values
+		ns := hr.Namespace
 
 		switch {
 		case v.ConfigMapKeyRef != nil:
 			cm := v.ConfigMapKeyRef
 			name := cm.Name
+			if cm.Namespace != "" {
+				ns = cm.Namespace
+			}
 			key := cm.Key
 			if key == "" {
 				key = "values.yaml"
 			}
-			optional := cm.Optional != nil && *cm.Optional
 			configMap, err := coreV1Client.ConfigMaps(ns).Get(name, metav1.GetOptions{})
 			if err != nil {
-				if errors.IsNotFound(err) && optional {
+				if errors.IsNotFound(err) && cm.Optional {
 					continue
 				}
 				return result, err
 			}
 			d, ok := configMap.Data[key]
 			if !ok {
-				if optional {
+				if cm.Optional {
 					continue
 				}
 				return result, fmt.Errorf("could not find key %v in ConfigMap %s/%s", key, ns, name)
 			}
 			if err := yaml.Unmarshal([]byte(d), &valueFile); err != nil {
-				if optional {
+				if cm.Optional {
 					continue
 				}
 				return result, fmt.Errorf("unable to yaml.Unmarshal %v from %s in ConfigMap %s/%s", d, key, ns, name)
@@ -81,21 +61,23 @@ func composeValues(coreV1Client corev1.CoreV1Interface, hr *v1.HelmRelease, char
 		case v.SecretKeyRef != nil:
 			s := v.SecretKeyRef
 			name := s.Name
+			if s.Namespace != "" {
+				ns = s.Namespace
+			}
 			key := s.Key
 			if key == "" {
 				key = "values.yaml"
 			}
-			optional := s.Optional != nil && *s.Optional
 			secret, err := coreV1Client.Secrets(ns).Get(name, metav1.GetOptions{})
 			if err != nil {
-				if errors.IsNotFound(err) && optional {
+				if errors.IsNotFound(err) && s.Optional {
 					continue
 				}
 				return result, err
 			}
 			d, ok := secret.Data[key]
 			if !ok {
-				if optional {
+				if s.Optional {
 					continue
 				}
 				return result, fmt.Errorf("could not find key %s in Secret %s/%s", key, ns, name)
@@ -135,13 +117,13 @@ func composeValues(coreV1Client corev1.CoreV1Interface, hr *v1.HelmRelease, char
 				if optional {
 					continue
 				}
-				return result, fmt.Errorf("unable to yaml.Unmarshal %v from URL %s", f, filePath)
+				return result, fmt.Errorf("unable to yaml.Unmarshal %v from path %s", f, filePath)
 			}
 		}
 		result = mergeValues(result, valueFile)
 	}
 
-	result = mergeValues(result, hr.Spec.Values)
+	result = mergeValues(result, hr.Spec.Values.Data)
 	return result, nil
 }
 
@@ -158,11 +140,16 @@ func readURL(URL string) ([]byte, error) {
 	if err != nil {
 		return []byte{}, err
 	}
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return []byte{}, err
+	switch resp.StatusCode {
+	case http.StatusOK:
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return []byte{}, err
+		}
+		return body, nil
+	default:
+		return []byte{}, fmt.Errorf("failed to retrieve file from URL, status '%s (%d)'", resp.Status, resp.StatusCode)
 	}
-	return body, nil
 }
 
 // readLocalChartFile attempts to read a file from the chart path.

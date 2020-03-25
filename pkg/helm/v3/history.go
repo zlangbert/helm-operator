@@ -4,45 +4,38 @@ import (
 	"github.com/pkg/errors"
 
 	"helm.sh/helm/v3/pkg/action"
-	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/releaseutil"
 
 	"github.com/fluxcd/helm-operator/pkg/helm"
 )
 
 func (h *HelmV3) History(releaseName string, opts helm.HistoryOptions) ([]*helm.Release, error) {
-	cfg, cleanup, err := initActionConfig(h.kc, HelmOptions{Namespace: opts.Namespace})
-	defer cleanup()
-
+	cfg, err := newActionConfig(h.kubeConfig, h.infoLogFunc(opts.Namespace, releaseName), opts.Namespace, "")
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to setup Helm client")
+		return nil, err
 	}
 
-	client := action.NewHistory(cfg)
-	client.Max = opts.Max
+	history := action.NewHistory(cfg)
+	historyOptions(opts).configure(history)
 
-	hist, err := client.Run(releaseName)
+	hist, err := history.Run(releaseName)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to retrieve history for [%s]", releaseName)
+		return nil, errors.Wrapf(err, "failed to retrieve history for '%s'", releaseName)
 	}
 
 	releaseutil.Reverse(hist, releaseutil.SortByRevision)
 
-	var rels []*release.Release
-	for i := 0; i < min(len(hist), client.Max); i++ {
-		rels = append(rels, hist[i])
+	var rels []*helm.Release
+	for i := 0; i < min(len(hist), history.Max); i++ {
+		rels = append(rels, releaseToGenericRelease(hist[i]))
 	}
-
-	return getReleaseHistory(hist), nil
+	return rels, nil
 }
 
-func getReleaseHistory(rls []*release.Release) []*helm.Release {
-	history := make([]*helm.Release, len(rls))
-	for i := len(rls) - 1; i >= 0; i-- {
-		r := rls[i]
-		history = append(history, releaseToGenericRelease(r))
-	}
-	return history
+type historyOptions helm.HistoryOptions
+
+func (opts historyOptions) configure(action *action.History) {
+	action.Max = opts.Max
 }
 
 func min(x, y int) int {

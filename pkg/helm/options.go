@@ -2,6 +2,15 @@ package helm
 
 import "time"
 
+// GetOptions holds the options available for Helm uninstall
+// operations, the version implementation _must_ implement all
+// fields supported by that version but can (silently) ignore
+// unsupported set values.
+type GetOptions struct {
+	Namespace string
+	Version   int
+}
+
 // UpgradeOptions holds the options available for Helm upgrade
 // operations, the version implementation _must_ implement all
 // fields supported by that version but can (silently) ignore
@@ -16,6 +25,7 @@ type UpgradeOptions struct {
 	ClientOnly   bool
 	Force        bool
 	ResetValues  bool
+	SkipCRDs     bool
 	ReuseValues  bool
 	Recreate     bool
 	MaxHistory   int
@@ -56,13 +66,4 @@ type UninstallOptions struct {
 type HistoryOptions struct {
 	Namespace string
 	Max       int
-}
-
-// StatusOptions holds the options available for Helm uninstall
-// operations, the version implementation _must_ implement all
-// fields supported by that version but can (silently) ignore
-// unsupported set values.
-type StatusOptions struct {
-	Namespace string
-	Version   int
 }

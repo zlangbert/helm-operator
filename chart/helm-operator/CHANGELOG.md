@@ -1,3 +1,38 @@
+## 0.7.0 (2020-02-14)
+
+### Improvements
+
+ - Update Helm Operator to `1.0.0-rc9`
+   [fluxcd/helm-operator#298](https://github.com/fluxcd/helm-operator/pull/298)
+ - Allow init containers to be set
+   [fluxcd/helm-operator#276](https://github.com/fluxcd/helm-operator/pull/276)
+ - Support installation of Helm plugins
+   [fluxcd/helm-operator#276](https://github.com/fluxcd/helm-operator/pull/276)
+ - Support Helm 3 CRD installation
+   [fluxcd/helm-operator#287](https://github.com/fluxcd/helm-operator/pull/287)
+
+## 0.6.0 (2020-01-26)
+
+### Improvements
+
+ - Update Helm Operator to `1.0.0-rc8`
+   [fluxcd/helm-operator#244](https://github.com/fluxcd/helm-operator/pull/244)
+ - Allow pod annotations, labels and account annotations to be set
+   [fluxcd/helm-operator#229](https://github.com/fluxcd/helm-operator/pull/229)
+
+## 0.5.0 (2020-01-10)
+
+### Improvements
+
+ - Update Helm Operator to `1.0.0-rc7`
+   [fluxcd/helm-operator#197](https://github.com/fluxcd/helm-operator/pull/197)
+ - Add support for configuring cert files for repositories
+   [fluxcd/helm-operator#183](https://github.com/fluxcd/helm-operator/pull/183)
+ - Add support for configuring Helm v3 repositories
+   [fluxcd/helm-operator#173](https://github.com/fluxcd/helm-operator/pull/173)
+ - Add Prometheus Operator ServiceMonitor templates
+   [fluxcd/helm-operator#139](https://github.com/fluxcd/helm-operator/pull/139)
+
 ## 0.4.0 (2019-12-23)
 
 ### Improvements

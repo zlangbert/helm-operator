@@ -32,7 +32,9 @@ cleanup
 mkdir -p "${TMP_DIFFROOT}"
 cp -a "${DIFFROOT}"/* "${TMP_DIFFROOT}"
 
-"${REPO_ROOT}/hack/update/generated.sh"
+"${REPO_ROOT}/hack/update/generate-codegen.sh"
+"${REPO_ROOT}/hack/update/generate-crds.sh"
+
 echo "diffing ${DIFFROOT} against freshly generated codegen"
 ret=0
 diff -Naupr "${DIFFROOT}" "${TMP_DIFFROOT}" || ret=$?
